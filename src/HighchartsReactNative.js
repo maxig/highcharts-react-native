@@ -34,12 +34,21 @@ export default class HighchartsReactNative extends React.PureComponent {
     }
     componentDidUpdate() {
         // send options for chart.update() as string to webview
-        this.webView.postMessage(
-            this.serialize(this.props.options, true)
-        );
+        const injectedJS = `
+            try {
+                Highcharts.charts[0].update(hcUtils.parseOptions('${this.serialize(this.props.options, true)}'));
+            }
+            catch(err) {
+                document.getElementById("container").innerHTML = err.message;
+            }
+
+            true
+        `
+
+        this._webViewRef.injectJavaScript(injectedJS);
     }
     /**
-     * Convert JSON to string. When is updated, functions (like events.load) 
+     * Convert JSON to string. When is updated, functions (like events.load)
      * is not wrapped in quotes.
      */
     serialize(chartOptions, isUpdate) {
@@ -74,25 +83,48 @@ export default class HighchartsReactNative extends React.PureComponent {
     }
     render() {
         const runFirst = `
-           
+
+            const hcUtils = {
+                // convert string to JSON, including functions.
+                parseOptions: function (chartOptions) {
+                    const parseFunction = this.parseFunction;
+
+                    var options = JSON.parse(chartOptions, function (val, key) {
+                        if (typeof key === 'string' && key.indexOf('function') > -1) {
+                            return parseFunction(key);
+                        } else {
+                            return key;
+                        }
+                    });
+
+                    return options;
+                },
+                // convert funtion string to function
+                parseFunction: function (fc) {
+
+                    var fcArgs = fc.match(/\((.*?)\)/)[1],
+                        fcbody = fc.split('{');
+
+                    return new Function(fcArgs, '{' + fcbody.slice(1).join('{'));
+                }
+            };
 
            function loadDoc() {
 
               var xhttp = new XMLHttpRequest();
               xhttp.onreadystatechange = function() {
                 if (this.readyState == 4 && this.status == 200) {
-                    
+
                     var hcScript = document.createElement('script');
                     hcScript.innerHTML = this.responseText;
                     document.body.appendChild(hcScript);
-             
+
                     Highcharts.chart("container", ${this.serialize(this.props.options)});
                 }
               };
               xhttp.open("GET", "${path}highcharts.js", true);
               xhttp.send();
             }
-
 
             loadDoc();
         `;
@@ -105,7 +137,7 @@ export default class HighchartsReactNative extends React.PureComponent {
         >
 
             <WebView
-                ref={this._webViewRef}
+                ref={(ref) => { this._webViewRef = ref; }}
                 source={highchartsLayout}
                 injectedJavaScript={runFirst}
                 originWhitelist={["*"]}
