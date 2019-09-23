@@ -1,11 +1,11 @@
 import React from 'react';
 import {
-    WebView,
     Text,
     View,
     Dimensions,
     StyleSheet
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 
 const win = Dimensions.get('window');
 const path = '../highcharts-files/';
@@ -24,9 +24,6 @@ export default class HighchartsReactNative extends React.PureComponent {
             chartOptions: this.props.options
         };
 
-        // create script tag and apply all references
-        this.addHighchartsScripts = this.addHighchartsScripts.bind(this);
-
         // catch rotation event
         Dimensions.addEventListener('change', () => {
             this.setState({
@@ -37,12 +34,21 @@ export default class HighchartsReactNative extends React.PureComponent {
     }
     componentDidUpdate() {
         // send options for chart.update() as string to webview
-        this.webView.postMessage(
-            this.serialize(this.props.options, true)
-        );
+        const injectedJS = `
+            try {
+                Highcharts.charts[0].update('${this.serialize(this.props.options, true)}');
+            }
+            catch(err) {
+                document.getElementById("container").innerHTML = err.message;
+            }
+
+            true
+        `
+
+        this._webViewRef.injectJavaScript(injectedJS);
     }
     /**
-     * Convert JSON to string. When is updated, functions (like events.load) 
+     * Convert JSON to string. When is updated, functions (like events.load)
      * is not wrapped in quotes.
      */
     serialize(chartOptions, isUpdate) {
@@ -75,66 +81,46 @@ export default class HighchartsReactNative extends React.PureComponent {
 
         return serializedOptions;
     }
-    // Create <scripts> with references to highcharts files
-    addHighchartsScripts() {
-        const highchartsInit = `
-                Highcharts.chart(
-                'container',
-                ${this.serialize(this.props.options)},
-                ${this.serialize(this.props.callback)}
-                )
-            `;
-
-        return `
-            var modules = ${this.serialize(this.props.modules) || '[]'},
-                moduleCounter = modules.length,
-                hcScript;
-
-            hcScript = document.createElement('script');
-
-            hcScript.setAttribute('src', '${path}highcharts.js');
-            hcScript.onload = function() {
-
-                if (moduleCounter === 0) {
-                    ${highchartsInit}
-                } else {
-                    modules.forEach(function(scr) {
-
-                        var moduleScript = document.createElement('script');
-
-                        moduleScript.setAttribute('src', '${path}' + scr + '.js');
-                        moduleScript.onload = function() {
-
-                            moduleCounter--;
-
-                            if (moduleCounter === 0) {
-                              ${highchartsInit}
-                            }
-                        };
-                        document.body.appendChild(moduleScript);
-                    });
-                };
-            };
-            document.body.appendChild(hcScript);
-        `;
-    }
     render() {
+        const runFirst = `
+
+           function loadDoc() {
+
+              var xhttp = new XMLHttpRequest();
+              xhttp.onreadystatechange = function() {
+                if (this.readyState == 4 && this.status == 200) {
+
+                    var hcScript = document.createElement('script');
+                    hcScript.innerHTML = this.responseText;
+                    document.body.appendChild(hcScript);
+
+                    Highcharts.chart("container", ${this.serialize(this.props.options)});
+                }
+              };
+              xhttp.open("GET", "${path}highcharts.js", true);
+              xhttp.send();
+            }
+
+            loadDoc();
+        `;
+
         // Create container for the chart
         return <View style={[
             this.props.styles,
             { width: this.state.width, height: this.state.height }
         ]}
         >
+
             <WebView
-                ref={(webView) => this.webView = webView}
+                ref={this._webViewRef}
                 source={highchartsLayout}
-                injectedJavaScript={this.addHighchartsScripts()}
+                injectedJavaScript={runFirst}
                 originWhitelist={["*"]}
                 automaticallyAdjustContentInsets={true}
                 allowFileAccess={true}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
-                scalesPageToFit={true}
+                useWebKit={true}
                 scrollEnabled={false}
                 mixedContentMode='always'
             />
