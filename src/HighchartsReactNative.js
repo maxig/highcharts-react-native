@@ -4,8 +4,7 @@ import {
     View,
     Dimensions,
     StyleSheet,
-    Platform,
-    // WebView,
+    Platform
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
@@ -13,6 +12,7 @@ import { Asset } from 'expo-asset';
 const win = Dimensions.get('window');
 const cdnPath = 'http://code.highcharts.com/';
 const path = '../highcharts-files/';
+
 const highchartsLayout = (Platform.OS == 'ios') ? require('../highcharts-layout/index.html') : { uri: 'file:///android_asset/highcharts-layout/index.html' }
 // const highchartsLayout = (Platform.OS == 'ios') ? require('../highcharts-layout/index.html') : { uri: Asset.fromModule(require('../highcharts-layout/index.html')).uri }
 // const highchartsLayout = require('../highcharts-layout/index.html');
@@ -100,35 +100,9 @@ true;
         return serializedOptions;
     }
     render() {
-        // console.log(Asset.fromModule(require('../highcharts-layout/index.html')).uri);
         const scriptsPath = this.state.useCDN ? cdnPath : path;
         const runFirst = `
-
-            const hcUtils = {
-                // convert string to JSON, including functions.
-                parseOptions: function (chartOptions) {
-                    const parseFunction = this.parseFunction;
-
-                    var options = JSON.parse(chartOptions, function (val, key) {
-                        if (typeof key === 'string' && key.indexOf('function') > -1) {
-                            return parseFunction(key);
-                        } else {
-                            return key;
-                        }
-                    });
-
-                    return options;
-                },
-                // convert funtion string to function
-                parseFunction: function (fc) {
-
-                    var fcArgs = fc.match(/\((.*?)\)/)[1],
-                        fcbody = fc.split('{');
-
-                    return new Function(fcArgs, '{' + fcbody.slice(1).join('{'));
-                }
-            };
-
+           
            var modulesList = ${JSON.stringify(this.state.modules)};
 
            if (modulesList.length > 0) {
@@ -185,7 +159,8 @@ true;
         >
 
             <WebView
-                ref={(webView) => this.webView = webView}
+                ref = "webview"
+                //ref={(webView) => this.webView = webView}
                 source={highchartsLayout}
                 injectedJavaScript={runFirst}
                 originWhitelist={["*"]}
