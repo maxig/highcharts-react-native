@@ -3,13 +3,19 @@ import {
     Text,
     View,
     Dimensions,
-    StyleSheet
+    StyleSheet,
+    Platform,
+    // WebView,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { Asset } from 'expo-asset';
 
 const win = Dimensions.get('window');
+const cdnPath = 'http://code.highcharts.com/';
 const path = '../highcharts-files/';
-const highchartsLayout = require('../highcharts-layout/index.html');
+const highchartsLayout = (Platform.OS == 'ios') ? require('../highcharts-layout/index.html') : { uri: 'file:///android_asset/highcharts-layout/index.html' }
+// const highchartsLayout = (Platform.OS == 'ios') ? require('../highcharts-layout/index.html') : { uri: Asset.fromModule(require('../highcharts-layout/index.html')).uri }
+// const highchartsLayout = require('../highcharts-layout/index.html');
 
 export default class HighchartsReactNative extends React.PureComponent {
     constructor(props) {
@@ -21,8 +27,12 @@ export default class HighchartsReactNative extends React.PureComponent {
         this.state = {
             width: userStyles.width || win.width,
             height: userStyles.height || win.height,
-            chartOptions: this.props.options
+            chartOptions: this.props.options,
+            useCDN: this.props.useCDN || false,
+            modules: this.props.modules && this.props.modules.toString() || []
         };
+
+        this.initialCHartOptions = this.props.options;
 
         // catch rotation event
         Dimensions.addEventListener('change', () => {
@@ -35,17 +45,25 @@ export default class HighchartsReactNative extends React.PureComponent {
     componentDidUpdate() {
         // send options for chart.update() as string to webview
         const injectedJS = `
-            try {
-                Highcharts.charts[0].update(hcUtils.parseOptions('${this.serialize(this.props.options, true)}'));
-            }
-            catch(err) {
-                document.getElementById("container").innerHTML = err.message;
-            }
+setTimeout(() => {
+    try {
+        // Highcharts.charts[0].update(hcUtils.parseOptions('${this.serialize(this.props.options, true)}'));
+        ${
+            this.props.options.series && this.props.options.series[0] && this.props.options.series[0].data &&
+            `Highcharts.charts[0].series[0].setData([${this.props.options.series[0].data}], true, true);` ||
+            `Highcharts.charts[0].update(hcUtils.parseOptions('${this.serialize(this.props.options, true)}'));`
+        }
+    }
+    catch(err) {
+        document.getElementById("container").innerHTML = err.message;
+    }
+}, 10);
 
-            true
+true;
         `
 
-        this._webViewRef.injectJavaScript(injectedJS);
+        console.log(injectedJS);
+        this.webView.injectJavaScript(injectedJS);
     }
     /**
      * Convert JSON to string. When is updated, functions (like events.load)
@@ -82,6 +100,8 @@ export default class HighchartsReactNative extends React.PureComponent {
         return serializedOptions;
     }
     render() {
+        // console.log(Asset.fromModule(require('../highcharts-layout/index.html')).uri);
+        const scriptsPath = this.state.useCDN ? cdnPath : path;
         const runFirst = `
 
             const hcUtils = {
@@ -109,7 +129,13 @@ export default class HighchartsReactNative extends React.PureComponent {
                 }
             };
 
-           function loadDoc() {
+           var modulesList = ${JSON.stringify(this.state.modules)};
+
+           if (modulesList.length > 0) {
+              modulesList = modulesList.split(',');
+           }
+
+           function loadScripts(file, callback, redraw, isModule) {
 
               var xhttp = new XMLHttpRequest();
               xhttp.onreadystatechange = function() {
@@ -119,14 +145,36 @@ export default class HighchartsReactNative extends React.PureComponent {
                     hcScript.innerHTML = this.responseText;
                     document.body.appendChild(hcScript);
 
-                    Highcharts.chart("container", ${this.serialize(this.props.options)});
+                    if (callback) {
+                        callback.call();
+                    }
+
+                    if (redraw) {
+                        Highcharts.chart("container", ${this.serialize(this.initialCHartOptions)});
+                    }
                 }
               };
-              xhttp.open("GET", "${path}highcharts.js", true);
+              xhttp.open("GET", '${scriptsPath}' + (isModule ? 'modules/' + file : file) + '.js', true);
               xhttp.send();
             }
 
-            loadDoc();
+
+            loadScripts('highcharts', function () {
+                var redraw = modulesList.length > 0 ? false : true;
+
+                loadScripts('highcharts-more', function () {
+                    if (modulesList.length > 0) {
+                        for (var i = 0; i < modulesList.length; i++) {
+                            if (i === (modulesList.length - 1)) {
+                                redraw = true;
+                            } else {
+                                redraw = false;
+                            }
+                            loadScripts(modulesList[i], undefined, redraw, true);
+                        }
+                    }
+                }, redraw);
+            }, false);
         `;
 
         // Create container for the chart
@@ -137,7 +185,7 @@ export default class HighchartsReactNative extends React.PureComponent {
         >
 
             <WebView
-                ref={(ref) => { this._webViewRef = ref; }}
+                ref={(webView) => this.webView = webView}
                 source={highchartsLayout}
                 injectedJavaScript={runFirst}
                 originWhitelist={["*"]}
