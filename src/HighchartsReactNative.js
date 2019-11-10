@@ -159,8 +159,7 @@ true;
         >
 
             <WebView
-                ref = "webview"
-                //ref={(webView) => this.webView = webView}
+                ref={(webView) => this.webView = webView}
                 source={highchartsLayout}
                 injectedJavaScript={runFirst}
                 originWhitelist={["*"]}
