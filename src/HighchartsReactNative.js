@@ -8,14 +8,61 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
+import AssetUtils from 'expo-asset-utils';
 
 const win = Dimensions.get('window');
-const cdnPath = 'http://code.highcharts.com/';
+const cdnPath = 'https://code.highcharts.com/';
 const path = '../highcharts-files/';
+const highchartsLayout = `
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=0" />
+    <link rel="stylesheet" type="text/css" href="css/styles.css">
+    <script>
+        const hcUtils = {
+            // convert string to JSON, including functions.
+            parseOptions: function (chartOptions) {
+                const parseFunction = this.parseFunction;
 
-const highchartsLayout = (Platform.OS == 'ios') ? require('../highcharts-layout/index.html') : { uri: 'file:///android_asset/highcharts-layout/index.html' }
-// const highchartsLayout = (Platform.OS == 'ios') ? require('../highcharts-layout/index.html') : { uri: Asset.fromModule(require('../highcharts-layout/index.html')).uri }
-// const highchartsLayout = require('../highcharts-layout/index.html');
+                var options = JSON.parse(chartOptions, function (val, key) {
+                    if (typeof key === 'string' && key.indexOf('function') > -1) {
+                        return parseFunction(key);
+                    } else {
+                        return key;
+                    }
+                });
+
+                return options;
+            },
+            // convert funtion string to function
+            parseFunction: function (fc) {
+
+                var fcArgs = fc.match(/\((.*?)\)/)[1],
+                    fcbody = fc.split('{');
+
+                return new Function(fcArgs, '{' + fcbody.slice(1).join('{'));
+            }
+        };
+
+        // Communication between React app and webview. Receive chart options as string.
+        document.addEventListener('message', function (data) {
+            Highcharts.charts[0].update(
+                hcUtils.parseOptions(data.data)
+            );
+        });
+
+        window.addEventListener('message', function (data) {
+            Highcharts.charts[0].update(
+                hcUtils.parseOptions(data.data)
+            );
+        });
+    </script>
+  </head>
+  <body>
+    <div id="container"></div>
+  </body>
+</html>
+`
 
 export default class HighchartsReactNative extends React.PureComponent {
     constructor(props) {
@@ -29,7 +76,7 @@ export default class HighchartsReactNative extends React.PureComponent {
             height: userStyles.height || win.height,
             chartOptions: this.props.options,
             useCDN: this.props.useCDN || false,
-            modules: this.props.modules && this.props.modules.toString() || []
+            modules: this.props.modules && this.props.modules.toString() || [],
         };
 
         this.initialCHartOptions = this.props.options;
@@ -42,6 +89,7 @@ export default class HighchartsReactNative extends React.PureComponent {
             });
         });
     }
+
     componentDidUpdate() {
         // send options for chart.update() as string to webview
         const injectedJS = `
@@ -65,6 +113,7 @@ true;
         console.log(injectedJS);
         this.webView.injectJavaScript(injectedJS);
     }
+
     /**
      * Convert JSON to string. When is updated, functions (like events.load)
      * is not wrapped in quotes.
@@ -102,7 +151,8 @@ true;
     render() {
         const scriptsPath = this.state.useCDN ? cdnPath : path;
         const runFirst = `
-           
+    try {
+
            var modulesList = ${JSON.stringify(this.state.modules)};
 
            if (modulesList.length > 0) {
@@ -111,8 +161,11 @@ true;
 
            function loadScripts(file, callback, redraw, isModule) {
 
+            // alert('loading' + file);
+
               var xhttp = new XMLHttpRequest();
               xhttp.onreadystatechange = function() {
+                // alert(this.status + (this.statusText || '') + (this.responseText || ''));
                 if (this.readyState == 4 && this.status == 200) {
 
                     var hcScript = document.createElement('script');
@@ -149,6 +202,10 @@ true;
                     }
                 }, redraw);
             }, false);
+    }
+    catch(err) {
+        document.getElementById("container").innerHTML = err.message;
+    }
         `;
 
         // Create container for the chart
@@ -159,8 +216,9 @@ true;
         >
 
             <WebView
+                // ref = "webview"
                 ref={(webView) => this.webView = webView}
-                source={highchartsLayout}
+                source={{ html: highchartsLayout }}
                 injectedJavaScript={runFirst}
                 originWhitelist={["*"]}
                 automaticallyAdjustContentInsets={true}
